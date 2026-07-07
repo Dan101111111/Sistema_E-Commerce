@@ -33,12 +33,42 @@ Este documento registra todas las mejoras y modificaciones implementadas recient
 - Se desarrolló el script `scripts/seed_variants.py` para asignar variantes predeterminadas a los productos existentes que no tenían (como Tallas de Zapatillas, Polos, Casacas, etc.), permitiendo que el catálogo sea testeable de inmediato sin necesidad de editar todos los productos manualmente.
 
 ## 6. Módulos Pendientes de Implementación ⏳
-A continuación, se listan las funcionalidades que están programadas para desarrollarse en las siguientes fases del proyecto:
 
-- **Integración de Pasarela de Pagos (Stripe):**
-  - Reemplazar la simulación actual de pago por un flujo real de checkout utilizando Stripe.
-  - Generación de links de pago o incrustación del formulario de tarjeta dentro de la aplicación.
-- **Automatizaciones con n8n:**
-  - Actualmente, la configuración de n8n se encuentra en un entorno local y en fase de pruebas.
-  - **Falta:** Conectar firmemente los webhooks/triggers desde Supabase hacia n8n para disparar notificaciones automatizadas (WhatsApp, Email y Google Sheets) cada vez que se cree o actualice una orden.
-  - Despliegue de los flujos de n8n para producción.
+A continuación, se listan las funcionalidades que están programadas para desarrollarse en las siguientes fases del proyecto, según el análisis del sistema:
+
+### 🔴 Prioridad Alta (Esenciales para escalar)
+1. **Sistema de Categorías y Búsqueda**
+   - *En la Tienda:* Necesitamos un buscador por texto, un filtro lateral por categorías y opciones para ordenar (por precio menor/mayor).
+   - *En el Admin:* Un módulo CRUD para gestionar categorías, de forma que al crear un producto se le asigne a una.
+2. **Pasarela de Pagos Real (Payment Gateway)**
+   - El checkout actual solo guarda los datos de la orden en estado "Pendiente".
+   - *Mejora:* Integrar Stripe, MercadoPago, o PayPal. Al confirmar el carrito, el usuario debe poner su tarjeta y el sistema validar el pago antes de guardar la orden.
+3. **Autenticación de Clientes (Login/Registro)**
+   - El cliente actualmente compra como "Invitado".
+   - *Mejora:* Usar supabase.auth para permitir que los usuarios creen una cuenta.
+   - *Beneficio:* Los clientes podrán entrar a "Mis Pedidos" y no tendrán que llenar sus datos de envío en cada compra.
+
+### 🟡 Prioridad Media (Experiencia de Usuario y Gestión)
+4. **Variantes de Productos** *(Sub-stocks)*
+   - Si bien ya se implementó la selección dinámica, falta que cada variante (Ej. Talla M, Color Rojo) tenga su propio sub-stock independiente.
+5. **Página de Detalle de Producto**
+   - Actualmente se compra directamente desde la tarjeta principal.
+   - *Mejora:* Al hacer clic en un producto, debe abrir una vista detallada (modal o nueva página) que muestre múltiples imágenes, descripción larga (HTML/Markdown) y reseñas.
+6. **Sistema de Descuentos y Cupones**
+   - *En el Admin:* Módulo para crear códigos de descuento (ej. "VERANO20") o automáticos.
+   - *En la Tienda:* Un campo en el carrito para ingresar el cupón antes de pagar.
+7. **Gestión de Envíos (Shipping)**
+   - Implementar una tabla de zonas/distritos con un costo de envío asociado que se sume automáticamente al total del carrito.
+
+### 🟢 Prioridad Baja (Toques Profesionales)
+8. **Módulo de CRM (Gestión de Clientes en Admin)**
+   - Pestaña extra en el panel de vendedor donde se listen todos los clientes registrados, indicando cuánto han gastado en total (Life Time Value) y permitiendo exportar sus correos para marketing.
+9. **Reseñas y Calificaciones (Reviews)**
+   - Permitir que clientes registrados que tengan una orden con estado "Completado" puedan dejar 1 a 5 estrellas y un comentario.
+10. **Paginación de Productos**
+    - Para catálogos grandes, implementar carga perezosa (Lazy Loading) o paginación estándar (Página 1, 2, 3...) para evitar lentitud.
+
+### 🤖 Integración y Automatizaciones (n8n)
+- Actualmente, la configuración de n8n se encuentra en un entorno local y en fase de pruebas. Faltaría trabajarlo a fondo.
+- **Falta:** Conectar firmemente los webhooks/triggers desde Supabase hacia n8n para disparar notificaciones automatizadas (WhatsApp, Email y Google Sheets) cada vez que se cree o actualice una orden.
+- Despliegue de los flujos de n8n para producción.
