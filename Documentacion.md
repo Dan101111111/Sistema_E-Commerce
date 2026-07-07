@@ -31,3 +31,14 @@ Este documento registra todas las mejoras y modificaciones implementadas recient
 
 ## 5. Scripts Automáticos (Seeders) 🚀
 - Se desarrolló el script `scripts/seed_variants.py` para asignar variantes predeterminadas a los productos existentes que no tenían (como Tallas de Zapatillas, Polos, Casacas, etc.), permitiendo que el catálogo sea testeable de inmediato sin necesidad de editar todos los productos manualmente.
+
+## 6. Módulos Pendientes de Implementación ⏳
+A continuación, se listan las funcionalidades que están programadas para desarrollarse en las siguientes fases del proyecto:
+
+- **Integración de Pasarela de Pagos (Stripe):**
+  - Reemplazar la simulación actual de pago por un flujo real de checkout utilizando Stripe.
+  - Generación de links de pago o incrustación del formulario de tarjeta dentro de la aplicación.
+- **Automatizaciones con n8n:**
+  - Actualmente, la configuración de n8n se encuentra en un entorno local y en fase de pruebas.
+  - **Falta:** Conectar firmemente los webhooks/triggers desde Supabase hacia n8n para disparar notificaciones automatizadas (WhatsApp, Email y Google Sheets) cada vez que se cree o actualice una orden.
+  - Despliegue de los flujos de n8n para producción.
