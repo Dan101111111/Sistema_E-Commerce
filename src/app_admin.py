@@ -8,6 +8,7 @@ from supabase import create_client, Client
 import pandas as pd
 from datetime import datetime, timedelta
 import json
+from streamlit_cookies_controller import CookieController
 import plotly.express as px
 import plotly.graph_objects as go
 from reportlab.lib.pagesizes import letter, A4
@@ -33,7 +34,6 @@ st.set_page_config(
 # ==================== CONEXIÓN A SUPABASE ====================
 
 
-@st.cache_resource
 def init_supabase() -> Client:
     """Inicializa la conexión a Supabase"""
     try:
@@ -48,6 +48,83 @@ def init_supabase() -> Client:
 
 
 supabase = init_supabase()
+
+
+controller = CookieController()
+
+# Intentar restaurar sesión desde cookies
+if 'user' not in st.session_state or not st.session_state.user:
+    access_token = controller.get('sb_admin_access')
+    refresh_token = controller.get('sb_admin_refresh')
+    if access_token and refresh_token:
+        try:
+            res = supabase.auth.set_session(access_token, refresh_token)
+            if res.user:
+                profile_res = supabase.table('profiles').select('role, full_name').eq('id', res.user.id).execute()
+                if profile_res.data and profile_res.data[0]['role'] == 'admin':
+                    st.session_state.user = res.user
+                    st.session_state.profile = profile_res.data[0]
+        except Exception:
+            pass
+
+if 'user' not in st.session_state:
+
+    st.session_state.user = None
+if 'profile' not in st.session_state:
+    st.session_state.profile = None
+
+
+
+# ==================== FUNCIONES DE AUTENTICACIÓN ====================
+
+def login_admin(email, password):
+    try:
+        res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+        # Validar rol admin
+        profile_res = supabase.table('profiles').select('role, full_name').eq('id', res.user.id).execute()
+        
+        if profile_res.data and profile_res.data[0]['role'] == 'admin':
+            st.session_state.user = res.user
+            st.session_state.profile = profile_res.data[0]
+            if res.session:
+                controller.set('sb_admin_access', res.session.access_token)
+                controller.set('sb_admin_refresh', res.session.refresh_token)
+            return True, "Login exitoso"
+        else:
+            supabase.auth.sign_out()
+            return False, "Acceso denegado: No eres administrador."
+    except Exception as e:
+        return False, str(e)
+
+def register_admin(email, password, full_name, admin_secret):
+    if admin_secret != "supersecreto123":
+        return False, "Código secreto de administrador incorrecto."
+    try:
+        res = supabase.auth.sign_up({"email": email, "password": password})
+        if res.user:
+            supabase.table('profiles').insert({
+                "id": res.user.id,
+                "full_name": full_name,
+                "role": "admin"
+            }).execute()
+            st.session_state.user = res.user
+            st.session_state.profile = {"role": "admin", "full_name": full_name}
+            if res.session:
+                controller.set('sb_admin_access', res.session.access_token)
+                controller.set('sb_admin_refresh', res.session.refresh_token)
+            return True, "Administrador registrado exitosamente"
+    except Exception as e:
+        return False, str(e)
+
+def logout_admin():
+    try:
+        supabase.auth.sign_out()
+    except:
+        pass
+    controller.remove('sb_admin_access')
+    controller.remove('sb_admin_refresh')
+    st.session_state.user = None
+    st.session_state.profile = None
 
 # ==================== FUNCIONES DE IMÁGENES ====================
 
@@ -105,36 +182,39 @@ def get_all_products():
         return []
 
 
-def create_product(name, description, price, stock, image_url=None):
-    """Crea un nuevo producto"""
+def create_product(name, description, price, stock, category_id=None, image_url=None, variant_options=None):
+    """Crea un nuevo producto en la base de datos"""
     try:
         data = {
             "name": name,
             "description": description,
             "price": float(price),
-            "stock": int(stock)
+            "stock": int(stock),
+            "category_id": category_id,
+            "image_url": image_url
         }
-        if image_url:
-            data["image_url"] = image_url
+        if variant_options is not None:
+            data["variant_options"] = variant_options
         response = supabase.table("products").insert(data).execute()
         return True, "✅ Producto creado exitosamente"
     except Exception as e:
         return False, f"❌ Error al crear producto: {str(e)}"
 
 
-def update_product(product_id, name, description, price, stock, image_url=None):
+def update_product(product_id, name, description, price, stock, category_id=None, image_url=None, variant_options=None):
     """Actualiza un producto existente"""
     try:
         data = {
             "name": name,
             "description": description,
             "price": float(price),
-            "stock": int(stock)
+            "stock": int(stock),
+            "category_id": category_id,
+            "image_url": image_url
         }
-        if image_url is not None:  # Permitir actualizar incluso si es None (para borrar imagen)
-            data["image_url"] = image_url
-        response = supabase.table("products").update(
-            data).eq("id", product_id).execute()
+        if variant_options is not None:
+            data["variant_options"] = variant_options
+        response = supabase.table("products").update(data).eq("id", product_id).execute()
         return True, "✅ Producto actualizado exitosamente"
     except Exception as e:
         return False, f"❌ Error al actualizar producto: {str(e)}"
@@ -161,6 +241,33 @@ def get_product_by_name(name):
     except Exception as e:
         st.error(f"Error al buscar producto: {str(e)}")
         return None
+
+# ==================== FUNCIONES DE CATEGORÍAS ====================
+
+def get_all_categories():
+    """Obtiene todas las categorías"""
+    try:
+        response = supabase.table("categories").select("*").order("name").execute()
+        return response.data
+    except Exception as e:
+        st.error(f"Error al obtener categorías: {str(e)}")
+        return []
+
+def create_category(name):
+    """Crea una nueva categoría"""
+    try:
+        response = supabase.table("categories").insert({"name": name}).execute()
+        return True, "✅ Categoría creada exitosamente"
+    except Exception as e:
+        return False, f"❌ Error al crear categoría: {str(e)}"
+
+def delete_category(category_id):
+    """Elimina una categoría"""
+    try:
+        response = supabase.table("categories").delete().eq("id", category_id).execute()
+        return True, "✅ Categoría eliminada exitosamente"
+    except Exception as e:
+        return False, f"❌ Error al eliminar categoría: {str(e)}"
 
 # ==================== FUNCIONES DE ÓRDENES ====================
 
@@ -385,7 +492,7 @@ def create_top_products_chart(orders):
 
         fig.update_traces(
             marker_color='#059669',
-            texttemplate='%{text}',
+            texttemplate='%{x}',
             textposition='outside'
         )
 
@@ -435,7 +542,7 @@ def create_revenue_by_month_chart(orders):
 
         fig.update_traces(
             marker_color='#047857',
-            texttemplate='S/ %{text:.2f}',
+            texttemplate='S/ %{y:.2f}',
             textposition='outside'
         )
 
@@ -834,40 +941,64 @@ def page_products():
         if products:
             st.subheader(f"Total: {len(products)} productos")
 
+            # Encabezados de la tabla simulada
+            with st.container():
+                hcol1, hcol2, hcol3, hcol4, hcol5, hcol6 = st.columns([1, 2, 3, 1, 1, 1])
+                hcol1.markdown("**Imagen**")
+                hcol2.markdown("**Nombre**")
+                hcol3.markdown("**Descripción**")
+                hcol4.markdown("**Precio**")
+                hcol5.markdown("**Stock**")
+                hcol6.markdown("**Acciones**")
+            st.divider()
+
             for product in products:
                 with st.container():
-                    col1, col2, col3, col4, col5 = st.columns([3, 3, 2, 2, 2])
+                    col1, col2, col3, col4, col5, col6 = st.columns([1, 2, 3, 1, 1, 1])
 
                     with col1:
-                        # Mostrar imagen si existe
                         image_url = product.get('image_url')
                         if image_url:
-                            st.image(image_url, width=80)
-                        st.write(f"**{product['name']}**")
+                            # Contenedor para imagen con tamaño fijo
+                            st.markdown(f'''
+                                <div style="width: 50px; height: 50px; border-radius: 5px; overflow: hidden; display: flex; justify-content: center; align-items: center; background-color: #f0f2f6;">
+                                    <img src="{image_url}" style="max-width: 100%; max-height: 100%; object-fit: cover;">
+                                </div>
+                            ''', unsafe_allow_html=True)
+                        else:
+                            st.markdown("🖼️")
 
                     with col2:
-                        desc = product.get('description', '')
-                        if desc and len(desc) > 40:
-                            desc = desc[:40] + "..."
-                        st.write(f"*{desc}*")
+                        st.write(f"**{product['name']}**")
+                        cat_id = product.get('category_id')
+                        if cat_id:
+                            all_cats = get_all_categories()
+                            cat_name = next((c['name'] for c in all_cats if c['id'] == cat_id), "")
+                            if cat_name:
+                                st.caption(cat_name)
 
                     with col3:
-                        st.write(f"**S/ {product['price']:.2f}**")
+                        desc = product.get('description', '')
+                        if desc and len(desc) > 50:
+                            desc = desc[:50] + "..."
+                        st.write(f"*{desc}*")
 
                     with col4:
-                        st.write(render_stock_badge(product['stock']))
+                        st.write(f"S/ {product['price']:.2f}")
 
                     with col5:
-                        col_edit, col_delete = st.columns(2)
-                        with col_edit:
-                            if st.button("✏️", key=f"edit_{product['id']}"):
+                        st.write(render_stock_badge(product['stock']))
+
+                    with col6:
+                        c_edit, c_del = st.columns(2)
+                        with c_edit:
+                            if st.button("✏️", key=f"edit_{product['id']}", help="Editar"):
                                 st.session_state.editing_product = product
                                 st.rerun()
-                        with col_delete:
-                            if st.button("🗑️", key=f"delete_{product['id']}"):
+                        with c_del:
+                            if st.button("🗑️", key=f"delete_{product['id']}", help="Eliminar"):
                                 st.session_state.deleting_product = product
                                 st.rerun()
-
                     st.divider()
         else:
             st.info("No hay productos registrados. ¡Crea el primero!")
@@ -875,150 +1006,127 @@ def page_products():
     with tab2:
         st.subheader("Crear Nuevo Producto")
 
-        # File uploader fuera del form (Streamlit no permite file_uploader dentro de forms)
-        uploaded_image = st.file_uploader(
-            "📷 Imagen del Producto (opcional)",
-            type=["jpg", "jpeg", "png", "webp"],
-            help="Sube una imagen del producto. Formatos soportados: JPG, PNG, WEBP"
-        )
-
-        # Vista previa de la imagen
-        if uploaded_image:
-            col_preview1, col_preview2 = st.columns([1, 3])
-            with col_preview1:
-                st.image(uploaded_image, caption="Vista previa", width=150)
-            with col_preview2:
-                st.info("📸 La imagen se subirá cuando crees el producto")
-
+        categories = get_all_categories()
+        
         with st.form("form_create_product"):
-            name = st.text_input("Nombre del Producto *",
-                                 placeholder="Ej: Polo Básico Blanco")
-            description = st.text_area(
-                "Descripción", placeholder="Describe el producto...")
+            new_name = st.text_input("Nombre del Producto *", placeholder="Ej: Polo Básico Blanco")
+            new_desc = st.text_area("Descripción", placeholder="Describe el producto...")
+            
             col1, col2 = st.columns(2)
             with col1:
-                price = st.number_input(
-                    "Precio (S/) *", min_value=0.0, step=0.5, format="%.2f")
+                new_price = st.number_input("Precio (S/) *", min_value=0.0, step=0.5, format="%.2f")
             with col2:
-                stock = st.number_input("Stock *", min_value=0, step=1)
-
-            submitted = st.form_submit_button(
-                "✅ Crear Producto", use_container_width=True)
-
+                new_stock = st.number_input("Stock *", min_value=0, step=1)
+            
+            new_cat_name = st.selectbox("Categoría", ["Ninguna"] + [c['name'] for c in categories])
+            variant_input = st.text_area("Variantes Dinámicas (Opcional)", help="FORMATO REQUERIDO:\nAtributo: valor1, valor2, valor3\n\nEjemplo:\nTalla: S, M, L\nColor: Rojo, Azul", placeholder="Talla: 40, 41, 42\nColor: Blanco, Negro")
+            new_image = st.file_uploader("Imagen del Producto", type=['png', 'jpg', 'jpeg', 'webp'])
+            
+            submitted = st.form_submit_button("✅ Crear Producto", use_container_width=True)
+            
             if submitted:
-                if not name:
-                    st.error("❌ El nombre del producto es obligatorio")
-                elif price <= 0:
-                    st.error("❌ El precio debe ser mayor a 0")
+                if not new_name or new_price <= 0:
+                    st.error("❌ Nombre y precio son obligatorios")
                 else:
-                    # Subir imagen si fue cargada
-                    image_url = None
-                    if uploaded_image:
-                        with st.spinner("📤 Subiendo imagen..."):
-                            success_img, result_img = upload_image_to_supabase(uploaded_image)
-                            if success_img:
-                                image_url = result_img
-                            else:
-                                st.error(result_img)
-                                st.stop()
+                    variant_options = []
+                    if variant_input:
+                        for line in variant_input.split('\n'):
+                            if ':' in line:
+                                attr, vals = line.split(':', 1)
+                                opts = [v.strip() for v in vals.split(',') if v.strip()]
+                                if attr.strip() and opts:
+                                    variant_options.append({"name": attr.strip(), "values": opts})
 
-                    success, message = create_product(
-                        name, description, price, stock, image_url)
+                    image_url = None
+                    if new_image:
+                        success_img, result_img = upload_image_to_supabase(new_image)
+                        if success_img: image_url = result_img
+                            
+                    cat_id = None
+                    if new_cat_name != "Ninguna":
+                        cat_id = next((c['id'] for c in categories if c['name'] == new_cat_name), None)
+                            
+                    success, msg = create_product(new_name, new_desc, new_price, new_stock, cat_id, image_url, variant_options)
                     if success:
-                        st.success(message)
+                        st.success(msg)
                         st.rerun()
                     else:
-                        st.error(message)
+                        st.error(msg)
 
     # Modal de edición
     if 'editing_product' in st.session_state:
-        product = st.session_state.editing_product
-
+        product_to_edit = st.session_state.editing_product
         st.divider()
-        st.subheader(f"✏️ Editar: {product['name']}")
-
-        # Mostrar imagen actual si existe
-        current_image_url = product.get('image_url')
-        if current_image_url:
-            col_img1, col_img2 = st.columns([1, 3])
-            with col_img1:
-                st.write("**Imagen Actual:**")
-                st.image(current_image_url, width=150)
-            with col_img2:
-                st.info("📸 Esta es la imagen actual del producto")
-
-        # File uploader para nueva imagen
-        new_uploaded_image = st.file_uploader(
-            "📷 Cambiar Imagen del Producto (opcional)",
-            type=["jpg", "jpeg", "png", "webp"],
-            help="Sube una nueva imagen para reemplazar la actual",
-            key="edit_image_uploader"
-        )
-
-        # Vista previa de nueva imagen
-        if new_uploaded_image:
-            col_img1, col_img2 = st.columns([1, 3])
-            with col_img1:
-                st.write("**Nueva Imagen:**")
-                st.image(new_uploaded_image, caption="Vista previa", width=150)
-            with col_img2:
-                st.warning("⚠️ La imagen anterior será eliminada al guardar")
+        st.subheader(f"✏️ Editar: {product_to_edit['name']}")
 
         with st.form("form_edit_product"):
-            name = st.text_input("Nombre del Producto *",
-                                 value=product['name'])
-            description = st.text_area(
-                "Descripción", value=product.get('description', ''))
+            edit_name = st.text_input("Nombre del Producto *", value=product_to_edit['name'])
+            edit_desc = st.text_area("Descripción", value=product_to_edit.get('description', ''))
+            
             col1, col2 = st.columns(2)
             with col1:
-                price = st.number_input(
-                    "Precio (S/) *", min_value=0.0, step=0.5, value=float(product['price']), format="%.2f")
+                edit_price = st.number_input("Precio (S/) *", min_value=0.0, step=0.5, value=float(product_to_edit['price']), format="%.2f")
             with col2:
-                stock = st.number_input(
-                    "Stock *", min_value=0, step=1, value=product['stock'])
+                edit_stock = st.number_input("Stock *", min_value=0, step=1, value=product_to_edit['stock'])
 
+            categories = get_all_categories()
+            cat_options = {c['name']: c['id'] for c in categories}
+            cat_names = ["Sin categoría"] + list(cat_options.keys())
+            
+            # Encontrar categoría actual
+            current_cat_idx = 0
+            if product_to_edit.get('category_id'):
+                for i, cname in enumerate(cat_names):
+                    if cat_options.get(cname) == product_to_edit.get('category_id'):
+                        current_cat_idx = i
+                        break
+            
+            edit_category_name = st.selectbox("Categoría", cat_names, index=current_cat_idx)
+
+            current_variants = product_to_edit.get('variant_options', [])
+            var_str_initial = "\n".join([f"{v['name']}:{','.join(v['values'])}" for v in current_variants]) if current_variants else ""
+            edit_variant_input = st.text_area("Variantes Dinámicas (Opcional)", value=var_str_initial, help="FORMATO REQUERIDO:\nAtributo: valor1, valor2, valor3\n\nEjemplo:\nTalla: S, M, L\nColor: Rojo, Azul", placeholder="Talla: 40, 41, 42\nColor: Blanco, Negro")
+            edit_image = st.file_uploader("Nueva Imagen (opcional)", type=['png', 'jpg', 'jpeg', 'webp'])
+            
             col_save, col_cancel = st.columns(2)
             with col_save:
-                submitted = st.form_submit_button(
-                    "💾 Guardar Cambios", use_container_width=True)
+                submitted = st.form_submit_button("💾 Guardar Cambios", use_container_width=True)
             with col_cancel:
-                cancel = st.form_submit_button(
-                    "❌ Cancelar", use_container_width=True)
+                cancel = st.form_submit_button("❌ Cancelar", use_container_width=True)
 
             if submitted:
-                if not name:
-                    st.error("❌ El nombre del producto es obligatorio")
-                elif price <= 0:
-                    st.error("❌ El precio debe ser mayor a 0")
+                if not edit_name or edit_price <= 0:
+                    st.error("❌ El nombre es obligatorio y el precio debe ser mayor a 0")
                 else:
-                    # Manejar imagen
-                    image_url_to_update = None
-                    if new_uploaded_image:
-                        with st.spinner("📤 Subiendo nueva imagen..."):
-                            # Eliminar imagen anterior si existe
-                            if current_image_url:
-                                delete_image_from_supabase(current_image_url)
+                    variant_options = []
+                    if edit_variant_input:
+                        for line in edit_variant_input.split('\n'):
+                            if ':' in line:
+                                attr, vals = line.split(':', 1)
+                                opts = [v.strip() for v in vals.split(',') if v.strip()]
+                                if attr.strip() and opts:
+                                    variant_options.append({"name": attr.strip(), "values": opts})
 
-                            # Subir nueva imagen
-                            success_img, result_img = upload_image_to_supabase(new_uploaded_image)
-                            if success_img:
-                                image_url_to_update = result_img
-                            else:
-                                st.error(result_img)
-                                st.stop()
-                    else:
-                        # Mantener la imagen actual
-                        image_url_to_update = current_image_url
-
-                    success, message = update_product(
-                        product['id'], name, description, price, stock, image_url_to_update)
+                    image_url_to_update = product_to_edit.get('image_url')
+                    if edit_image:
+                        success_img, result_img = upload_image_to_supabase(edit_image)
+                        if success_img: 
+                            image_url_to_update = result_img
+                        else:
+                            st.error(result_img)
+                            st.stop()
+                        
+                    cat_id = cat_options.get(edit_category_name) if edit_category_name != "Sin categoría" else None
+                    
+                    success, msg = update_product(
+                        product_to_edit['id'], edit_name, edit_desc, edit_price, edit_stock, cat_id, image_url_to_update, variant_options)
                     if success:
-                        st.success(message)
+                        st.success(msg)
                         del st.session_state.editing_product
                         st.rerun()
                     else:
-                        st.error(message)
-
+                        st.error(msg)
+            
             if cancel:
                 del st.session_state.editing_product
                 st.rerun()
@@ -1234,20 +1342,117 @@ def page_orders():
             else:
                 st.warning("No hay órdenes en el rango de fechas seleccionado")
 
+# ==================== PÁGINA: CATEGORÍAS ====================
+
+def page_categories():
+    """Página de gestión de categorías"""
+    st.title("📑 Gestión de Categorías")
+    st.divider()
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.subheader("Lista de Categorías")
+        categories = get_all_categories()
+        
+        if categories:
+            for cat in categories:
+                with st.container():
+                    c1, c2 = st.columns([3, 1])
+                    with c1:
+                        st.write(f"**{cat['name']}**")
+                    with c2:
+                        if st.button("🗑️ Eliminar", key=f"del_cat_{cat['id']}"):
+                            success, msg = delete_category(cat['id'])
+                            if success:
+                                st.success(msg)
+                                st.rerun()
+                            else:
+                                st.error(msg)
+                    st.divider()
+        else:
+            st.info("No hay categorías registradas.")
+            
+    with col2:
+        st.subheader("Nueva Categoría")
+        with st.form("form_create_category"):
+            new_cat_name = st.text_input("Nombre de la Categoría *", placeholder="Ej: Ropa, Electrónica...")
+            submitted = st.form_submit_button("✅ Crear", use_container_width=True)
+            
+            if submitted:
+                if not new_cat_name:
+                    st.error("❌ El nombre es obligatorio")
+                else:
+                    success, msg = create_category(new_cat_name.strip())
+                    if success:
+                        st.success(msg)
+                        import time; time.sleep(0.5)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
 # ==================== NAVEGACIÓN ====================
 
 
+
+def render_admin_login():
+    st.title("🔐 Panel de Administración")
+    st.write("Debes iniciar sesión como administrador para acceder a este panel.")
+    
+    tab_login, tab_reg = st.tabs(["Ingresar", "Registrar Admin"])
+    with tab_login:
+        with st.form("admin_login"):
+            email = st.text_input("Email")
+            password = st.text_input("Contraseña", type="password")
+            if st.form_submit_button("Ingresar", use_container_width=True):
+                success, msg = login_admin(email, password)
+                if success:
+                    st.success(msg)
+                    import time; time.sleep(0.5)
+                    st.rerun()
+                else:
+                    st.error(msg)
+                    
+    with tab_reg:
+        st.info("Para registrar un nuevo administrador, necesitas el código secreto.")
+        with st.form("admin_reg"):
+            reg_name = st.text_input("Nombre Completo")
+            reg_email = st.text_input("Email")
+            reg_pass = st.text_input("Contraseña", type="password")
+            reg_secret = st.text_input("Código Secreto", type="password")
+            if st.form_submit_button("Registrar Admin", use_container_width=True):
+                if len(reg_pass) < 6:
+                    st.error("La contraseña debe tener al menos 6 caracteres")
+                else:
+                    success, msg = register_admin(reg_email, reg_pass, reg_name, reg_secret)
+                    if success:
+                        st.success(msg)
+                        import time; time.sleep(0.5)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
 def main():
     """Función principal con navegación"""
+    if not st.session_state.user:
+        render_admin_login()
+        return
 
     # Sidebar
     with st.sidebar:
+        st.write(f"Admin: {st.session_state.profile.get('full_name', '') if st.session_state.profile else ''}")
+        if st.button("🚪 Cerrar Sesión", use_container_width=True):
+            logout_admin()
+            st.rerun()
+            
+        st.divider()
+
         st.title("🏪 Panel Vendedor")
         st.divider()
 
         page = st.radio(
             "Navegación",
-            ["📊 Dashboard", "📦 Productos", "🛒 Órdenes"],
+            ["📊 Dashboard", "📦 Productos", "📑 Categorías", "🛒 Órdenes"],
             label_visibility="collapsed"
         )
 
@@ -1262,6 +1467,8 @@ def main():
         page_dashboard()
     elif page == "📦 Productos":
         page_products()
+    elif page == "📑 Categorías":
+        page_categories()
     elif page == "🛒 Órdenes":
         page_orders()
 

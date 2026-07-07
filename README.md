@@ -16,10 +16,11 @@ Sistema completo de comercio electrónico con dos aplicaciones web:
 - **Gestión Completa de Productos (CRUD)**
   - Crear, editar y eliminar productos
   - Control de stock con indicadores visuales
-  - Precios y descripciones personalizables
+  - Precios, descripciones personalizables y subida de imágenes a Supabase Storage
+  - **Variantes Dinámicas:** Permite definir características como Talla o Color por producto.
 
 - **Gestión de Órdenes**
-  - Visualización detallada de cada pedido
+  - Visualización detallada de cada pedido, incluyendo la variante elegida por el cliente
   - Filtros por estado (Pendiente, Completado, Cancelado)
   - Cambio de estado con actualización automática de stock
   - Al marcar como "Completado", el stock se descuenta automáticamente
@@ -27,15 +28,20 @@ Sistema completo de comercio electrónico con dos aplicaciones web:
 ### 🛍️ Tienda Cliente (`tienda_cliente.py`)
 
 - **Catálogo de Productos**
-  - Grid responsive de 3 columnas
+  - Grid responsive de 3 columnas con imágenes dinámicas
+  - Búsqueda por texto y filtrado por categorías
   - Badges de disponibilidad por stock
-  - Productos agotados visibles pero deshabilitados
+  - Filtros dinámicos por **Variantes de Producto** en cada tarjeta
 
 - **Carrito de Compras**
-  - Agregar/quitar productos
+  - Agregar/quitar productos (con selección obligatoria de variante, ej. Talla M)
   - Modificar cantidades
   - Cálculo automático de totales
   - Indicador flotante del carrito
+
+- **Módulo de Autenticación y Sesión**
+  - Registro de usuarios e inicio de sesión
+  - Persistencia de sesión (el usuario se mantiene logueado aunque refresque la página)
 
 - **Checkout Inteligente**
   - Formulario de datos del cliente
